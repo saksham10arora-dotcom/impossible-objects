@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<script>if(location.hostname==="blog.saksham.digital")location.replace("https://saksham.digital"+location.pathname+location.search+location.hash)</script>
+<meta name="description" content="Five live 3D scenes you can orbit and poke: a strange attractor, a 4D Hopf fibration, liquid chrome, a lensing black hole and a morphing Mandelbulb.">
+<meta property="og:title" content="Impossible Objects">
+<meta property="og:description" content="Five live 3D scenes you can orbit and poke, running in your browser.">
+<meta property="og:url" content="https://saksham.digital/impossible-objects/">
+<link rel="canonical" href="https://saksham.digital/impossible-objects/">
+</head>
+<body>
+<title>Impossible Objects</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one full-bleed WebGL stage; type floats top-left, scene switcher docks bottom. Single dark world by choice. */
+:root{
+  --bg:#05040c;
+  --ink:#f1eefc;
+  --dim:#9d97b8;
+  --line:rgba(241,238,252,.16);
+  --panel:rgba(12,10,26,.62);
+  --accent:#ff7ad9;
+  --display:"Unbounded","Arial Black",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--mono);overflow:hidden;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+#stage{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab;background:var(--bg)}
+#stage:active{cursor:grabbing}
+.info{position:fixed;z-index:2;pointer-events:none;
+  top:calc(18px + env(safe-area-inset-top,0px));
+  left:max(20px,env(safe-area-inset-left,0px));right:max(20px,env(safe-area-inset-right,0px));
+  display:flex;flex-direction:column;gap:10px;max-width:34rem}
+.eyebrow{font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--dim)}
+.eyebrow b{color:var(--accent);font-weight:500}
+h1{margin:0;font-family:var(--display);font-weight:700;font-size:clamp(26px,5.4vw,56px);line-height:1.02;
+  text-wrap:balance;letter-spacing:-.02em;text-shadow:0 2px 30px rgba(0,0,0,.7)}
+.blurb{margin:0;font-size:13px;line-height:1.55;color:var(--ink);opacity:.86;max-width:30rem;text-shadow:0 1px 12px rgba(0,0,0,.9)}
+.fact{font-size:12px;color:var(--accent);font-variant-numeric:tabular-nums}
+.dock{position:fixed;z-index:2;left:0;right:0;bottom:0;
+  padding:0 max(16px,env(safe-area-inset-right,0px)) calc(16px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));
+  display:flex;flex-direction:column;align-items:center;gap:10px;pointer-events:none}
+.tabs{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;pointer-events:auto;
+  background:var(--panel);border:1px solid var(--line);padding:6px;border-radius:999px;backdrop-filter:blur(10px)}
+.tabs button{font:500 12px var(--mono);letter-spacing:.04em;color:var(--dim);background:transparent;border:0;
+  padding:9px 14px;border-radius:999px;cursor:pointer;font-variant-numeric:tabular-nums}
+.tabs button:hover{color:var(--ink)}
+.tabs button[aria-pressed="true"]{background:var(--accent);color:var(--bg)}
+.tabs button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.hint{font-size:11px;letter-spacing:.08em;color:var(--dim);text-align:center}
+#err{position:fixed;inset:0;z-index:3;display:grid;place-items:center;padding:24px;text-align:center;background:var(--bg);color:var(--ink)}
+@media (max-width:520px){.tabs{border-radius:22px}.tabs button{padding:8px 11px;font-size:11px}.tabs .nm{display:none}}
+</style>
+
+<canvas id="stage" aria-label="Interactive 3D scene"></canvas>
+
+<div class="info">
+  <div class="eyebrow">Impossible Objects <b id="count">1 / 5</b></div>
+  <h1 id="name">Thomas Attractor</h1>
+  <p class="blurb" id="blurb">Eighty thousand particles obeying three lines of maths. No particle ever repeats its path.</p>
+  <div class="fact" id="fact">dx = sin y − b·x, b = 0.208186</div>
+</div>
+
+<div class="dock">
+  <div class="tabs" id="tabs" role="group" aria-label="Scenes"></div>
+  <div class="hint" id="hint">drag to orbit · scroll or pinch to zoom · click to disturb · keys 1–5</div>
+</div>
+<div id="err" hidden>This page needs WebGL, and this browser did not give it one.</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+<script>
+(function(){
+const canvas=document.getElementById('stage');
+let R;
+try{ if(!window.THREE) throw 0; R=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'}); }
+catch(e){ document.getElementById('err').hidden=false; return; }
+
+const small=Math.min(innerWidth,innerHeight)<600;
+const calm=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const basePR=Math.min(devicePixelRatio||1, small?1.5:2);
+R.setClearColor(0x05040c,1);
+
+const cam=new THREE.PerspectiveCamera(55,1,0.05,400);
+const ortho=new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+const orbit={th:.6,ph:1.2,d:8,vth:0,vph:0,drag:false};
+
+const PAL=`vec3 pal(float t){return .5+.5*cos(6.28318*(t*vec3(1.,.82,.68)+vec3(.58,.36,.12)));}`;
+const QUAD_V=`void main(){gl_Position=vec4(position.xy,0.,1.);}`;
+const QUAD_U=`uniform vec2 uRes;uniform float uT,uK;uniform vec3 uO,uR,uU,uF;`;
+
+function quadScene(frag){
+  const u={uRes:{value:new THREE.Vector2(1,1)},uT:{value:0},uK:{value:0},
+    uO:{value:new THREE.Vector3()},uR:{value:new THREE.Vector3()},uU:{value:new THREE.Vector3()},uF:{value:new THREE.Vector3()}};
+  const m=new THREE.ShaderMaterial({uniforms:u,vertexShader:QUAD_V,fragmentShader:QUAD_U+PAL+frag,depthTest:false});
+  const sc=new THREE.Scene(); const q=new THREE.Mesh(new THREE.PlaneGeometry(2,2),m); q.frustumCulled=false; sc.add(q);
+  return {scene:sc,u};
+}
+function syncQuad(u,t){
+  u.uT.value=t; u.uO.value.copy(cam.position);
+  u.uR.value.setFromMatrixColumn(cam.matrixWorld,0);
+  u.uU.value.setFromMatrixColumn(cam.matrixWorld,1);
+  u.uF.value.setFromMatrixColumn(cam.matrixWorld,2).negate();
+  R.getDrawingBufferSize(u.uRes.value);
+}
+
+/* ---------- 1. Thomas attractor ---------- */
+const attractor={
+  name:'Thomas Attractor', tab:'Attractor', hue:'#ff7ad9',
+  blurb:'Eighty thousand particles obeying three lines of maths. Chaos with perfect symmetry, and no particle ever repeats its path.',
+  fact:'dx = sin y − b·x,  b = 0.208186', view:[.7,1.15,13], bloom:[1.0,.55,0], pr:1,
+  init(){
+    const N=this.N=small?36000:80000, p=this.p=new Float32Array(N*3), s=this.s=new Float32Array(N);
+    for(let i=0;i<N*3;i++) p[i]=(Math.random()-.5)*8;
+    const g=this.g=new THREE.BufferGeometry();
+    g.setAttribute('position',new THREE.BufferAttribute(p,3));
+    g.setAttribute('spd',new THREE.BufferAttribute(s,1));
+    const m=new THREE.ShaderMaterial({transparent:true,depthTest:false,blending:THREE.AdditiveBlending,
+      uniforms:{uPx:{value:30*basePR}},
+      vertexShader:`attribute float spd;varying float vS;uniform float uPx;
+        void main(){vS=spd;vec4 mv=modelViewMatrix*vec4(position,1.);gl_Position=projectionMatrix*mv;gl_PointSize=uPx/-mv.z;}`,
+      fragmentShader:PAL+`varying float vS;
+        void main(){float d=length(gl_PointCoord-.5);float a=smoothstep(.5,0.,d);
+        gl_FragColor=vec4(pal(vS*.42+.05)*a*.5,1.);}`});
+    const pts=new THREE.Points(g,m); pts.frustumCulled=false;
+    this.scene=new THREE.Scene(); this.scene.add(pts);
+  },
+  poke(){ const p=this.p; for(let i=0;i<p.length;i++) p[i]=(Math.random()-.5)*14; },
+  update(t,dt){
+    const p=this.p,s=this.s,b=0.208186,h=Math.min(dt*3,.09);
+    for(let i=0,j=0;i<this.N;i++,j+=3){
+      const x=p[j],y=p[j+1],z=p[j+2];
+      const dx=Math.sin(y)-b*x, dy=Math.sin(z)-b*y, dz=Math.sin(x)-b*z;
+      p[j]=x+dx*h; p[j+1]=y+dy*h; p[j+2]=z+dz*h;
+      s[i]=Math.sqrt(dx*dx+dy*dy+dz*dz);
+    }
+    this.g.attributes.position.needsUpdate=true; this.g.attributes.spd.needsUpdate=true;
+  }
+};
+
+/* ---------- 2. Hopf fibration ---------- */
+const hopf={
+  name:'Hopf Fibration', tab:'Hopf 4D', hue:'#6fe3ff',
+  blurb:'A sphere that lives in four dimensions, sliced into circles and projected down to three. Every circle is linked through every other circle exactly once.',
+  fact:'S¹ → S³ → S²,  linking number 1', view:[.4,1.05,7.5], bloom:[1.25,.5,0], pr:1,
+  init(){
+    const lats=[.42,.86,1.3,1.74,2.18,2.62], per=small?24:38, seg=small?96:150, v=[];
+    for(const th of lats) for(let k=0;k<per;k++){
+      const ph=k/per*Math.PI*2;
+      for(let i=0;i<seg;i++){ v.push(th,ph,i/seg*Math.PI*2, th,ph,(i+1)/seg*Math.PI*2); }
+    }
+    const g=new THREE.BufferGeometry();
+    g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(v),3));
+    this.u={uT:{value:0},uW:{value:0}};
+    const m=new THREE.ShaderMaterial({uniforms:this.u,transparent:true,depthTest:false,blending:THREE.AdditiveBlending,
+      vertexShader:PAL+`uniform float uT,uW;varying vec3 vC;varying float vA;
+        void main(){
+          float th=position.x+.22*sin(uT*.35+position.y*2.),ph=position.y,t=position.z;
+          float a=cos(th*.5),b=sin(th*.5);
+          vec4 q=vec4(a*cos(t),a*sin(t),b*cos(t+ph),b*sin(t+ph));
+          float c1=cos(uW),s1=sin(uW); q.xw=mat2(c1,-s1,s1,c1)*q.xw;
+          float c2=cos(uT*.11),s2=sin(uT*.11); q.yz=mat2(c2,-s2,s2,c2)*q.yz;
+          vec3 p=q.xyz/max(1.-q.w,.035);
+          vA=1./(1.+dot(p,p)*.05);
+          vC=pal(ph/6.28318+position.x*.21+uT*.01);
+          gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.);
+        }`,
+      fragmentShader:`varying vec3 vC;varying float vA;void main(){gl_FragColor=vec4(vC*vA*.55,1.);}`});
+    const l=new THREE.LineSegments(g,m); l.frustumCulled=false;
+    this.scene=new THREE.Scene(); this.scene.add(l); this.w=0; this.kick=0;
+  },
+  poke(){ this.kick=2.6; },
+  update(t,dt){ this.kick*=Math.exp(-dt*1.6); this.w+=dt*(.2+this.kick); this.u.uT.value=t; this.u.uW.value=this.w; }
+};
+
+/* ---------- 3. Liquid chrome ---------- */
+const blob={
+  name:'Liquid Chrome', tab:'Chrome', hue:'#ffc46b',
+  blurb:'A sphere whose surface is being rewritten sixty times a second by interfering waves, wrapped in an oil-slick mirror.',
+  fact:'131,220 triangles, displaced on the GPU', view:[.9,1.3,6.6], bloom:[.42,.5,.62], pr:1,
+  init(){
+    const g=new THREE.IcosahedronGeometry(2,small?44:80);
+    if(small) this.fact='40,500 triangles, displaced on the GPU';
+    this.u={uT:{value:0},uA:{value:.42}};
+    const m=new THREE.ShaderMaterial({uniforms:this.u,extensions:{derivatives:true},
+      vertexShader:`uniform float uT,uA;varying vec3 vP;varying float vD;
+        float f(vec3 p){float t=uT;
+          return sin(p.x*1.7+t)*sin(p.y*1.9+t*1.3)*sin(p.z*1.5-t*.7)
+            +.5*sin(p.x*3.9-t*1.1+p.y*2.)*sin(p.z*4.3+t*.9+p.x)
+            +.2*sin(p.y*8.+t*2.)*sin(p.z*7.+p.x*6.-t*1.7);}
+        void main(){vec3 n=normalize(position);float d=f(n*1.6)*uA;vD=d;
+          vec4 w=modelMatrix*vec4(n*(2.+d),1.);vP=w.xyz;gl_Position=projectionMatrix*viewMatrix*w;}`,
+      fragmentShader:PAL+`uniform float uT;varying vec3 vP;varying float vD;
+        void main(){
+          vec3 n=normalize(cross(dFdx(vP),dFdy(vP)));vec3 v=normalize(cameraPosition-vP);
+          if(dot(n,v)<0.)n=-n;
+          float fr=pow(1.-max(dot(n,v),0.),3.);
+          vec3 r=reflect(-v,n);
+          float env=.5+.5*sin(r.y*8.+sin(r.x*5.+uT*.4)*2.+r.z*3.);
+          env=smoothstep(.15,.95,env);
+          vec3 base=pal(vD*.7+r.y*.22+uT*.035);
+          float key=pow(max(dot(r,normalize(vec3(.4,.8,.45))),0.),40.);
+          vec3 col=base*(.08+.92*env)+fr*vec3(.75,.85,1.)+key*2.;
+          gl_FragColor=vec4(col,1.);
+        }`});
+    this.scene=new THREE.Scene(); this.scene.add(new THREE.Mesh(g,m)); this.amp=.42;
+  },
+  poke(){ this.amp=1.25; },
+  update(t,dt){ this.amp+=(.42-this.amp)*Math.min(1,dt*1.8); this.u.uA.value=this.amp; this.u.uT.value=t*.9; }
+};
+
+/* ---------- 4. Black hole ---------- */
+const hole={
+  name:'Event Horizon', tab:'Black hole', hue:'#ff8a4c',
+  blurb:'Every pixel is a light ray bent by gravity on its way to you. The ring over the top is the far side of the disc, seen over the hole.',
+  fact:'photon sphere 1.5 rₛ · inner disc edge 3 rₛ', view:[.3,1.44,19], bloom:null, pr:small?.7:.85,
+  init(){
+    Object.assign(this,quadScene(`
+      float h21(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
+      float vn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
+        return mix(mix(h21(i),h21(i+vec2(1,0)),f.x),mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x),f.y);}
+      float fbm(vec2 p){float a=.5,s=0.;for(int i=0;i<4;i++){s+=a*vn(p);p=p*2.03+7.1;a*=.5;}return s;}
+      float h31(vec3 p){p=fract(p*.3183099+.1);p*=17.;return fract(p.x*p.y*p.z*(p.x+p.y+p.z));}
+      vec3 stars(vec3 d){
+        vec3 g=d*70.,id=floor(g),f=fract(g)-.5;float h=h31(id);
+        float s=smoothstep(.32,0.,length(f))*step(.975,h);
+        vec3 c=s*mix(vec3(1.,.78,.6),vec3(.65,.82,1.),fract(h*91.7))*2.2;
+        float band=exp(-pow(d.y*2.2+.5*d.x,2.)*3.);
+        c+=band*fbm(d.xz*3.+d.y*2.)*vec3(.16,.1,.24);
+        return c;}
+      void main(){
+        vec2 uv=(gl_FragCoord.xy*2.-uRes)/uRes.y;
+        vec3 p=uO,v=normalize(uR*uv.x+uU*uv.y+uF*1.7);
+        vec3 hv=cross(p,v);float h2=dot(hv,hv);
+        vec3 col=vec3(0.);float tr=1.;
+        for(int i=0;i<170;i++){
+          float r2=dot(p,p),r=sqrt(r2);
+          if(r<1.){tr=0.;break;}
+          if(r>60.&&dot(p,v)>0.)break;
+          float dt=clamp(.14*(r-.85),.03,1.1);
+          v+=-1.5*h2*p/(r2*r2*r)*dt;
+          vec3 np=p+v*dt;
+          if(p.y*np.y<0.){
+            vec3 c=mix(p,np,p.y/(p.y-np.y));float cr=length(c);
+            if(cr>3.&&cr<13.){
+              float w=uT*2.4/pow(cr,1.5);float cw=cos(w),sw=sin(w);
+              vec2 q=mat2(cw,-sw,sw,cw)*c.xz;
+              float n=fbm(vec2(length(q)*1.4,atan(q.y,q.x)*2.5))*.6+fbm(q*1.7)*.6;
+              float edge=smoothstep(3.,3.6,cr)*smoothstep(13.,7.,cr);
+              float heat=pow(3.2/cr,2.2);
+              vec3 dc=mix(vec3(1.,.28,.05),vec3(1.,.93,.8),clamp(heat*1.3,0.,1.))*(heat*5.+.15);
+              vec3 vel=normalize(vec3(-c.z,0.,c.x));
+              float dop=pow(1.+.55*dot(vel,-normalize(v)),3.);
+              float a=edge*clamp(n*1.5+uK,0.,1.);
+              col+=tr*dc*a*dop*(1.+uK*2.);tr*=1.-a*.92;
+            }
+          }
+          p=np;
+        }
+        col+=tr*stars(normalize(v));
+        col=1.-exp(-col*1.15);
+        gl_FragColor=vec4(pow(col,vec3(.9)),1.);
+      }`));
+    this.k=0;
+  },
+  poke(){ this.k=.7; },
+  update(t,dt){ this.k*=Math.exp(-dt*2.2); this.u.uK.value=this.k; syncQuad(this.u,t); }
+};
+
+/* ---------- 5. Mandelbulb ---------- */
+const bulb={
+  name:'Mandelbulb', tab:'Fractal', hue:'#9dff8a',
+  blurb:'One formula, iterated eight times per pixel. Zoom in as far as you like, the detail does not run out. The exponent drifts, so the whole thing keeps regrowing.',
+  fact:'z → zⁿ + c,  n = 8.00', view:[.5,1.2,2.9], bloom:null, pr:small?.6:.8, zoom:[1.25,5],
+  init(){
+    Object.assign(this,quadScene(`
+      float de(vec3 p,out float trap){
+        vec3 z=p;float dr=1.,r=0.;trap=9.;float P=uK;
+        for(int i=0;i<8;i++){
+          r=length(z);if(r>2.)break;
+          float th=acos(clamp(z.z/r,-1.,1.))*P,ph=atan(z.y,z.x)*P;
+          dr=pow(r,P-1.)*P*dr+1.;
+          z=pow(r,P)*vec3(sin(th)*cos(ph),sin(th)*sin(ph),cos(th))+p;
+          trap=min(trap,length(z));
+        }
+        return .5*log(max(r,1e-4))*r/dr;}
+      void main(){
+        vec2 uv=(gl_FragCoord.xy*2.-uRes)/uRes.y;
+        vec3 ro=uO.xzy,rd=normalize(uR*uv.x+uU*uv.y+uF*1.6).xzy;
+        float t=0.,tp=0.,d=1.,st=0.;bool hit=false;
+        for(int i=0;i<96;i++){
+          d=de(ro+rd*t,tp);
+          if(d<.0009*t){hit=true;break;}
+          t+=d;st+=1.;if(t>7.)break;
+        }
+        vec3 bg=mix(vec3(.02,.016,.05),vec3(.09,.04,.14),uv.y*.5+.5);
+        vec3 col=bg+pal(uT*.02+.3)*st*.0045;
+        if(hit){
+          vec3 p=ro+rd*t;vec2 e=vec2(.0012*t+.0004,0.);float q;
+          vec3 n=normalize(vec3(de(p+e.xyy,q)-de(p-e.xyy,q),de(p+e.yxy,q)-de(p-e.yxy,q),de(p+e.yyx,q)-de(p-e.yyx,q)));
+          float ao=pow(1.-st/96.,2.2);
+          float dif=max(dot(n,normalize(vec3(.6,.5,.8))),0.);
+          float rim=pow(1.-max(dot(n,-rd),0.),3.);
+          vec3 base=pal(tp*1.35+uT*.02);
+          col=base*(.12+.95*dif)*ao+rim*pal(tp+.45)*.55*ao;
+        }
+        col=1.-exp(-col*1.6);
+        gl_FragColor=vec4(pow(col,vec3(.85)),1.);
+      }`));
+    this.off=0; this.tt=0;
+  },
+  poke(){ this.off+=1; },
+  update(t,dt){
+    this.tt+=(this.off-this.tt)*Math.min(1,dt*2.5);
+    const P=6.5+1.5*Math.cos(t*.13)+this.tt; const n=((P-3)%8+8)%8+3;
+    this.u.uK.value=n; syncQuad(this.u,t);
+    const f='z → zⁿ + c,  n = '+n.toFixed(2); if(f!==this.shown){ this.shown=f; factEl.textContent=f; }
+  }
+};
+
+const scenes=[attractor,hopf,blob,hole,bulb];
+
+/* ---------- post ---------- */
+let composer=null,rpass=null,bloom=null;
+if(THREE.EffectComposer&&THREE.RenderPass&&THREE.UnrealBloomPass){
+  try{
+    composer=new THREE.EffectComposer(R);
+    rpass=new THREE.RenderPass(new THREE.Scene(),cam); composer.addPass(rpass);
+    bloom=new THREE.UnrealBloomPass(new THREE.Vector2(256,256),1,.5,0); composer.addPass(bloom);
+  }catch(e){ composer=null; }
+}
+
+/* ---------- UI ---------- */
+const nameEl=document.getElementById('name'),blurbEl=document.getElementById('blurb'),
+      factEl=document.getElementById('fact'),countEl=document.getElementById('count'),tabs=document.getElementById('tabs');
+let cur=-1,S=null;
+scenes.forEach((s,i)=>{
+  const b=document.createElement('button'); b.type='button'; b.id='tab-'+i;
+  b.innerHTML=(i+1)+'<span class="nm"> '+s.tab+'</span>'; b.setAttribute('aria-label',s.name);
+  b.setAttribute('aria-pressed','false'); b.addEventListener('click',()=>show(i)); tabs.appendChild(b);
+});
+function show(i){
+  i=(i+scenes.length)%scenes.length; if(i===cur) return;
+  const s=scenes[i];
+  if(!s.scene){ try{ s.init(); }catch(e){ console.error(e); return; } }
+  cur=i; S=s;
+  orbit.th=s.view[0]; orbit.ph=s.view[1]; orbit.d=s.view[2]; orbit.vth=orbit.vph=0;
+  nameEl.textContent=s.name; blurbEl.textContent=s.blurb; factEl.textContent=s.fact; s.shown=null;
+  countEl.textContent=(i+1)+' / '+scenes.length;
+  document.documentElement.style.setProperty('--accent',s.hue);
+  [...tabs.children].forEach((b,k)=>b.setAttribute('aria-pressed',k===i?'true':'false'));
+  if(bloom&&s.bloom){ bloom.strength=s.bloom[0]; bloom.radius=s.bloom[1]; bloom.threshold=s.bloom[2]; }
+  resize(true);
+  try{ localStorage.setItem('io-scene',String(i)); }catch(e){}
+}
+let lw=0,lh=0;
+function resize(force){
+  const w=canvas.clientWidth||innerWidth,h=canvas.clientHeight||innerHeight;
+  if(!force&&w===lw&&h===lh) return; lw=w; lh=h;
+  const pr=basePR*(S?S.pr:1);
+  R.setPixelRatio(pr); R.setSize(w,h,false);
+  if(composer){ composer.setPixelRatio(pr); composer.setSize(w,h); }
+  cam.aspect=w/h; cam.fov=w<h?70:55; cam.updateProjectionMatrix();
+}
+
+/* ---------- input ---------- */
+const ptrs=new Map(); let moved=0,pinch=0;
+canvas.addEventListener('pointerdown',e=>{ canvas.setPointerCapture(e.pointerId); ptrs.set(e.pointerId,[e.clientX,e.clientY]); moved=0; orbit.drag=true;
+  if(ptrs.size===2){ const a=[...ptrs.values()]; pinch=Math.hypot(a[0][0]-a[1][0],a[0][1]-a[1][1]); moved=99; } });
+canvas.addEventListener('pointermove',e=>{
+  const p=ptrs.get(e.pointerId); if(!p) return;
+  const dx=e.clientX-p[0],dy=e.clientY-p[1]; p[0]=e.clientX; p[1]=e.clientY;
+  if(ptrs.size===1){ moved+=Math.abs(dx)+Math.abs(dy); orbit.vth=dx*.006; orbit.vph=-dy*.006; orbit.th+=orbit.vth; orbit.ph+=orbit.vph; }
+  else if(ptrs.size===2){ const a=[...ptrs.values()]; const d=Math.hypot(a[0][0]-a[1][0],a[0][1]-a[1][1]); if(pinch>0) zoom(pinch/d); pinch=d; }
+});
+function up(e){ if(!ptrs.has(e.pointerId)) return; ptrs.delete(e.pointerId);
+  if(ptrs.size===0){ orbit.drag=false; if(moved<6&&e.type==='pointerup'&&S&&S.poke) S.poke(); } }
+canvas.addEventListener('pointerup',up); canvas.addEventListener('pointercancel',up);
+function zoom(f){ const z=S.zoom||[S.view[2]*.3,S.view[2]*3]; orbit.d=Math.min(z[1],Math.max(z[0],orbit.d*f)); }
+canvas.addEventListener('wheel',e=>{ e.preventDefault(); zoom(Math.exp(e.deltaY*.0012)); },{passive:false});
+addEventListener('keydown',e=>{
+  if(e.key>='1'&&e.key<='5') show(+e.key-1);
+  else if(e.key==='ArrowRight') show(cur+1);
+  else if(e.key==='ArrowLeft') show(cur-1);
+  else if(e.key===' '&&S&&S.poke&&document.activeElement.tagName!=='BUTTON'){ e.preventDefault(); S.poke(); }
+});
+
+/* ---------- loop ---------- */
+let last=performance.now()/1000,time=0;
+function frame(ms){
+  requestAnimationFrame(frame);
+  const now=ms/1000,dt=Math.min(.05,Math.max(0,now-last)); last=now; time+=dt*(calm?.35:1);
+  resize(false);
+  if(!orbit.drag){ orbit.th+=orbit.vth; orbit.ph+=orbit.vph; orbit.vth*=.93; orbit.vph*=.93; if(!calm) orbit.th+=dt*.07; }
+  orbit.ph=Math.min(3.05,Math.max(.09,orbit.ph));
+  const sp=Math.sin(orbit.ph);
+  cam.position.set(orbit.d*sp*Math.cos(orbit.th),orbit.d*Math.cos(orbit.ph),orbit.d*sp*Math.sin(orbit.th));
+  cam.lookAt(0,0,0); cam.updateMatrixWorld();
+  S.update(time,dt);
+  if(S.u&&S.u.uRes){ R.render(S.scene,ortho); }
+  else if(composer&&S.bloom){ rpass.scene=S.scene; composer.render(); }
+  else R.render(S.scene,cam);
+}
+let start=0; try{ const v=parseInt(localStorage.getItem('io-scene'),10); if(v>=0&&v<scenes.length) start=v; }catch(e){}
+show(start); if(!S) show(0);
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
